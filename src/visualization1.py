@@ -1,12 +1,7 @@
-from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data" / "raw"
-file_path = DATA_DIR / "StudentdataNARX.npz"
-
-data = np.load(file_path)
+data = np.load("../data/raw/StudentdataNARX.npz")
 
 Utr = data["Utr"]
 Ytr = data["Ytr"]
