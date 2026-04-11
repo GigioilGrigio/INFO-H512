@@ -1,0 +1,90 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.multioutput import MultiOutputRegressor
+
+
+df = pd.read_pickle("../../data/processed/best_features_df.pkl")
+
+
+def evaluate_models_time_series(df, test_size=0.2):
+    """
+    Train and compare multiple models on time series data.
+
+    Assumes df already contains ONLY:
+    - feature columns
+    - y1_target, y2_target
+
+    Returns:
+        pd.DataFrame with results
+    """
+
+    # --- Automatically detect targets ---
+    target_cols = ["y1_target", "y2_target"]
+
+    # everything else = features
+    feature_cols = [c for c in df.columns if c not in target_cols]
+
+    # --- Time-based split (NO SHUFFLE) ---
+    split_idx = int(len(df) * (1 - test_size))
+
+    train_df = df.iloc[:split_idx]
+    test_df = df.iloc[split_idx:]
+
+    X_train = train_df[feature_cols]
+    X_test = test_df[feature_cols]
+
+    y_train = train_df[target_cols]
+    y_test = test_df[target_cols]
+
+    # --- Models ---
+    models = {
+        "LinearRegression": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0),
+        "RandomForest": MultiOutputRegressor(
+            RandomForestRegressor(n_estimators=100, random_state=42)
+        ),
+    }
+
+    results = []
+
+    for name, model in models.items():
+        # Train
+        model.fit(X_train, y_train)
+
+        # Predict
+        y_pred = model.predict(X_test)
+
+        # --- Metrics ---
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
+        nmse = mse / np.var(y_test.values)
+
+        results.append({"Model": name, "RMSE": rmse, "NMSE": nmse})
+
+        # --- Plot y1 ---
+        plt.figure(figsize=(10, 3))
+        plt.plot(y_test.values[:, 0], label="y1 true")
+        plt.plot(y_pred[:, 0], label="y1 pred")
+        plt.title(f"{name} - y1")
+        plt.legend()
+        plt.grid()
+
+        # --- Plot y2 ---
+        plt.figure(figsize=(10, 3))
+        plt.plot(y_test.values[:, 1], label="y2 true")
+        plt.plot(y_pred[:, 1], label="y2 pred")
+        plt.title(f"{name} - y2")
+        plt.legend()
+        plt.grid()
+
+    plt.show()
+
+    return pd.DataFrame(results)
+
+
+results = evaluate_models_time_series(df)
+print(results)

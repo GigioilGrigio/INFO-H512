@@ -1,44 +1,41 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-data = np.load("../data/raw/StudentdataNARX.npz")
-
-Utr = data["Utr"]
-Ytr = data["Ytr"]
-Uts1 = data["Uts1"]
-Uts2 = data["Uts2"]
-
-plt.figure()
-
-plt.plot(Ytr[:, 0], label="y1")
-plt.plot(Ytr[:, 1], label="y2")
-
-plt.xlabel("Time step")
-plt.ylabel("Output")
-plt.title("Training Output (Ytr)")
-plt.legend()
-
-plt.show()
+df = pd.read_pickle("../data/interim/training_df.pkl")
 
 
-t = np.arange(Ytr.shape[0])  # time axis
+def plot_inputs_outputs(df):
+    """
+    Plots input signals (u1, u2) and output signals (y1, y2)
+    in two separate figures.
 
-fig, axs = plt.subplots(3, 1, sharex=True, figsize=(8, 6))
+    Parameters:
+        df (pd.DataFrame): DataFrame with columns ['u1', 'u2', 'y1', 'y2']
+                           and a timestamp index or column.
+    """
 
-# --- Outputs ---
-axs[0].plot(t, Ytr[:, 0], label="y1")
-axs[0].plot(t, Ytr[:, 1], label="y2")
-axs[0].set_title("Outputs (Ytr)")
-axs[0].legend()
+    # --- Plot inputs ---
+    plt.figure()
+    plt.plot(df.index, df["u1"], label="u1")
+    plt.plot(df.index, df["u2"], label="u2")
+    plt.title("Input Signals")
+    plt.xlabel("Time")
+    plt.ylabel("Inputs")
+    plt.legend()
+    plt.grid()
 
-# --- Input u1 ---
-axs[1].plot(t, Utr[:, 0], label="u1")
-axs[1].set_title("Input u1")
+    # --- Plot outputs ---
+    plt.figure()
+    plt.plot(df.index, df["y1"], label="y1")
+    plt.plot(df.index, df["y2"], label="y2")
+    plt.title("Output Signals")
+    plt.xlabel("Time")
+    plt.ylabel("Outputs")
+    plt.legend()
+    plt.grid()
 
-# --- Input u2 ---
-axs[2].plot(t, Utr[:, 1], label="u2")
-axs[2].set_title("Input u2")
+    plt.show()
 
-plt.xlabel("Time step")
-plt.tight_layout()
-plt.show()
+
+plot_inputs_outputs(df)
