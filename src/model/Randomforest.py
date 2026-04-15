@@ -4,23 +4,20 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from sklearn.preprocessing import StandardScaler
 
 
 def evaluate_rf_narx_long_term(df, test_size=0.2):
     """
-    Train and evaluate Random Forest with recursive long-term prediction.
-
-    Same structure as evaluate_models_time_series, but:
-    - Uses recursive forecasting
+    Random Forest NARX with recursive long-term prediction + feature standardization.
     """
 
     # --- Targets & features ---
     target_cols = ["y1_target", "y2_target"]
     feature_cols = [c for c in df.columns if c not in target_cols]
 
-    # --- Time-based split ---
+    # --- Time split ---
     split_idx = int(len(df) * (1 - test_size))
-
     train_df = df.iloc[:split_idx]
     test_df = df.iloc[split_idx:]
 
@@ -28,42 +25,46 @@ def evaluate_rf_narx_long_term(df, test_size=0.2):
     y_train = train_df[target_cols].values
     y_test = test_df[target_cols].values
 
+    # --- Standardization (X only) ---
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
     # --- Model ---
-    model = RandomForestRegressor(
-        n_estimators=200, max_depth=None, random_state=42, n_jobs=-1
-    )
+    model = RandomForestRegressor(n_estimators=200, random_state=42)
 
     # --- Train ---
-    model.fit(X_train, y_train)
+    model.fit(X_train_scaled, y_train)
 
     # --- Recursive prediction ---
     preds = []
     current_row = test_df.iloc[0].copy()
 
     for i in range(len(test_df)):
-        X = current_row[feature_cols].values.reshape(1, -1)
-        y_pred = model.predict(X)[0]
+        # scale current input row
+        X_current = scaler.transform(current_row[feature_cols].values.reshape(1, -1))
+
+        y_pred = model.predict(X_current)[0]
         preds.append(y_pred)
 
         if i < len(test_df) - 1:
             next_row = test_df.iloc[i + 1].copy()
 
-            # update lagged outputs (assumes lag_1 exists)
-            if "y1_lag_1" in next_row:
-                next_row["y1_lag_1"] = y_pred[0]
-            if "y2_lag_1" in next_row:
-                next_row["y2_lag_1"] = y_pred[1]
+            # update lagged outputs (if used as inputs)
+            if "y1_lag_0" in next_row:
+                next_row["y1_lag_0"] = y_pred[0]
+            if "y2_lag_0" in next_row:
+                next_row["y2_lag_0"] = y_pred[1]
 
             current_row = next_row
 
     y_pred = np.array(preds)
 
-    # --- Metrics (same style as your first function) ---
+    # --- Metrics ---
     mse = mean_squared_error(y_test, y_pred)
     rmse = np.sqrt(mse)
     nmse = mse / np.var(y_test)
 
-    print("=== Random Forest (Long-Term) ===")
+    print("=== Random Forest (Long-Term + Scaling) ===")
     print(f"RMSE: {rmse:.4f}, NMSE: {nmse:.4f}")
 
     # --- Plot y1 ---
@@ -84,16 +85,19 @@ def evaluate_rf_narx_long_term(df, test_size=0.2):
 
     plt.show()
 
-    # --- Return results in same format ---
     results = pd.DataFrame(
-        [{"Model": "RandomForest_LongTerm", "RMSE": rmse, "NMSE": nmse}]
+        [{"Model": "RandomForest_LongTerm_Scaled", "RMSE": rmse, "NMSE": nmse}]
     )
 
-    return results, model, y_pred, y_test
+    return results, model, y_pred, y_test, scaler
 
 
 df = pd.read_pickle("../../data/processed/best_features_df.pkl")
-results, model, y_pred, y_test = evaluate_rf_narx_long_term(df, test_size=0.2)
+results, model, y_pred, y_test, scaler = evaluate_rf_narx_long_term(df, test_size=0.3)
+
+
+df = pd.read_pickle("../../data/processed/best_features_pilot2.pkl")
+results, model, y_pred, y_test, scaler = evaluate_rf_narx_long_term(df, test_size=0.5)
 
 
 def plot_residual_acf_pacf(y_true, y_pred, lags=20):
