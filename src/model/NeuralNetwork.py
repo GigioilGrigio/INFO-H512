@@ -168,10 +168,11 @@ def plot_residual_acf_pacf(y_true, y_pred, lags=20):
 #     n_epochs=200,
 # )
 
+# todo recursive prediction for neural network
+
 
 # --- Example usage ---
 df = pd.read_pickle("../../data/processed/best_features_df.pkl")
-print(df.head(100))
 
 results, model, y_pred, y_test, scaler = evaluate_mlp_narx_long_term(
     df,
