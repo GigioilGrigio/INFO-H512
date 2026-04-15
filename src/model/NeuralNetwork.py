@@ -10,33 +10,9 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from tqdm.auto import tqdm
 
 
-def make_narx_supervised(df, target_cols, lag, feature_cols=None):
-    if feature_cols is None:
-        feature_cols = [c for c in df.columns if c not in target_cols]
-
-    if len(df) <= lag:
-        raise ValueError(f"Dataframe too short for lag={lag}.")
-
-    X, y = [], []
-
-    for t in tqdm(range(lag, len(df)), desc="Building supervised NARX data"):
-        row_features = []
-
-        for k in range(1, lag + 1):
-            row_features.extend(df[target_cols].iloc[t - k].to_numpy())
-
-        row_features.extend(df[feature_cols].iloc[t].to_numpy())
-
-        X.append(row_features)
-        y.append(df[target_cols].iloc[t].to_numpy())
-
-    return np.asarray(X), np.asarray(y), feature_cols
-
-
 def evaluate_mlp_narx_long_term(
     df,
     test_size=0.2,
-    lag=5,
     hidden_layer_sizes=(32, 16),
     random_state=42,
     n_epochs=200,
@@ -49,26 +25,20 @@ def evaluate_mlp_narx_long_term(
 
     feature_cols = [c for c in df.columns if c not in target_cols]
 
-    if len(train_df) <= lag:
-        raise ValueError(f"Train split too short for lag={lag}.")
+    X_train = train_df[feature_cols].to_numpy()
+    y_train = train_df[target_cols].to_numpy()
 
-    t0 = time.perf_counter()
-    X_train, y_train, feature_cols = make_narx_supervised(
-        train_df, target_cols=target_cols, lag=lag, feature_cols=feature_cols
-    )
-    print(f"Built training data in {time.perf_counter() - t0:.2f}s")
-
-    # Scale manually so we can show progress during training
+    # Scale inputs
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
 
-    # Use partial_fit so we can show a tqdm bar over epochs
+    # MLP trained one epoch at a time so tqdm can show progress
     model = MLPRegressor(
         hidden_layer_sizes=hidden_layer_sizes,
         activation="relu",
         solver="adam",
         random_state=random_state,
-        max_iter=1,          # one epoch per partial_fit call
+        max_iter=1,
         warm_start=True,
         shuffle=True,
     )
@@ -77,29 +47,34 @@ def evaluate_mlp_narx_long_term(
     train_start = time.perf_counter()
     for epoch in tqdm(range(n_epochs), desc="Training MLP", leave=True):
         model.partial_fit(X_train_scaled, y_train)
-        # optional live loss display
-        tqdm.write(f"Epoch {epoch + 1}/{n_epochs} | loss = {model.loss_:.6f}") if (epoch + 1) % 25 == 0 else None
+        if (epoch + 1) % 25 == 0:
+            tqdm.write(f"Epoch {epoch + 1}/{n_epochs} | loss = {model.loss_:.6f}")
 
     print(f"Training finished in {time.perf_counter() - train_start:.2f}s")
 
-    # Recursive long-term prediction
-    history = list(train_df[target_cols].iloc[-lag:].to_numpy())
-
+    # Recursive prediction
     preds = []
     pred_start = time.perf_counter()
-    for i in tqdm(range(len(test_df)), desc="Recursive prediction"):
-        exog_t = test_df.iloc[i][feature_cols].to_numpy()
 
-        lag_block = np.concatenate([history[-k] for k in range(1, lag + 1)])
-        X_t = np.concatenate([lag_block, exog_t]).reshape(1, -1)
+    current_row = test_df.iloc[0].copy()
+
+    for i in tqdm(range(len(test_df)), desc="Recursive prediction"):
+        X_t = current_row[feature_cols].to_numpy().reshape(1, -1)
         X_t_scaled = scaler.transform(X_t)
 
         y_pred_t = model.predict(X_t_scaled)[0]
         preds.append(y_pred_t)
 
-        history.append(y_pred_t)
-        if len(history) > lag:
-            history.pop(0)
+        if i < len(test_df) - 1:
+            next_row = test_df.iloc[i + 1].copy()
+
+            # Update only target-lag columns if they exist
+            if "y1_lag_0" in next_row.index:
+                next_row["y1_lag_0"] = y_pred_t[0]
+            if "y2_lag_0" in next_row.index:
+                next_row["y2_lag_0"] = y_pred_t[1]
+
+            current_row = next_row
 
     print(f"Prediction finished in {time.perf_counter() - pred_start:.2f}s")
 
@@ -110,19 +85,21 @@ def evaluate_mlp_narx_long_term(
     rmse = np.sqrt(mse)
     nmse = mse / np.var(y_test)
 
-    print(f"Lag: {lag}, RMSE: {rmse:.4f}, NMSE: {nmse:.4f}, Hidden Layers: {hidden_layer_sizes}")
+    print(
+        f"RMSE: {rmse:.4f}, NMSE: {nmse:.4f}, Hidden Layers: {hidden_layer_sizes}"
+    )
 
     plt.figure(figsize=(10, 3))
     plt.plot(y_test[:, 0], label="y1 true")
     plt.plot(y_pred[:, 0], label="y1 pred")
-    plt.title(f"MLP NARX Long-Term - y1 (lag={lag})")
+    plt.title("MLP NARX Long-Term - y1")
     plt.legend()
     plt.grid()
 
     plt.figure(figsize=(10, 3))
     plt.plot(y_test[:, 1], label="y2 true")
     plt.plot(y_pred[:, 1], label="y2 pred")
-    plt.title(f"MLP NARX Long-Term - y2 (lag={lag})")
+    plt.title("MLP NARX Long-Term - y2")
     plt.legend()
     plt.grid()
 
@@ -130,7 +107,7 @@ def evaluate_mlp_narx_long_term(
 
     results = pd.DataFrame(
         [{
-            "Model": f"MLP_NARX_L{lag}",
+            "Model": "MLP_NARX",
             "RMSE": rmse,
             "NMSE": nmse,
             "Hidden Layers": hidden_layer_sizes
@@ -159,7 +136,6 @@ def plot_residual_acf_pacf(y_true, y_pred, lags=20):
 
 
 # --- Example usage ---
-df = pd.read_pickle("../../data/processed/best_features_df.pkl")
 
 # evaluate narx mlp with variable lag:
 # for lag in [1, 2,3,4,5,6,7,8,9,10]:
@@ -179,12 +155,27 @@ df = pd.read_pickle("../../data/processed/best_features_df.pkl")
 #     hidden_layer_sizes=hidden_sizes,  # variable hidden layer sizes
 #   )
 
+# df = pd.read_pickle("../../data/processed/best_features_df.pkl")
+
+# # print out pkl file first 100 rows to check what it looks like
+# print(df.head(100))
+
+# results, model, y_pred, y_test, scaler = evaluate_mlp_narx_long_term(
+#     df,
+#     test_size=0.2,
+#     lag=3,
+#     hidden_layer_sizes=(1024, 512),
+#     n_epochs=200,
+# )
+
+
+# --- Example usage ---
 df = pd.read_pickle("../../data/processed/best_features_df.pkl")
+print(df.head(100))
 
 results, model, y_pred, y_test, scaler = evaluate_mlp_narx_long_term(
     df,
     test_size=0.2,
-    lag=3,
-    hidden_layer_sizes=(4096, 2048),
+    hidden_layer_sizes=(512, 256),
     n_epochs=200,
 )

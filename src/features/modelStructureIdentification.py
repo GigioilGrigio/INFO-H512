@@ -196,7 +196,7 @@ plot_na_nb_results(results_df)
 # from gridsearch
 
 best_na = 2
-best_nb = 0
+best_nb = 1
 
 
 def build_final_narx_df(
